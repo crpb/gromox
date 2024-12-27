@@ -6,7 +6,7 @@ After=gromox-http.service
 [Service]
 # Fallback if EnvironmentFile hasn't got any value
 Environment=PURGETIME=30d
-EnvironmentFile=/etc/gromox/cleaner.cfg
+EnvironmentFile=/etc/gromox/gromox.cfg
 ExecStart=/usr/sbin/gromox-mbop foreach.here.mb ( purge-softdelete -d ${PURGETIME} -r / ) ( purge-datafiles )
 MemoryDenyWriteExecute=yes
 PrivateDevices=yes
