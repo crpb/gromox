@@ -41,6 +41,8 @@ jobs:
         echo "nproc-all: $(nproc --all)"
         echo "proc-cpuinfo: $(grep -c '^processor' /proc/cpuinfo)"
         echo "MAKEFLAGS-x-2: -j$(($(nproc)*2))"
+        ls -al
+
     - name: buildall
       run: |
         #export MAKEFLAGS="-j$(($(nproc)*2))"
