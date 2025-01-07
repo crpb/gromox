@@ -30,6 +30,9 @@ jobs:
         path: libHX
     - name: buildall
       run: |
+        echo "lspcu-all: $(lscpu -a -p |grep -c -v '^#')"
+        echo "lspcu-online: $(lscpu -b -p |grep -c -v '^#')"
+        echo "lspcu-offline: $(lscpu -c -p |grep -c -v '^#')"
         export MAKEFLAGS="-j $(lscpu --online --parse | grep -c -v '^#')"
         echo -e "lscpu:\t$MAKEFLAGS\nnproc:\t$(nproc)"
         pushd vmime && cmake . -DVMIME_SENDMAIL_PATH:STRING="/usr/sbin/sendmail" -DVMIME_BUILD_SAMPLES:BOOL=OFF -DVMIME_HAVE_TLS_SUPPORT:BOOL=ON -DVMIME_BUILD_STATIC_LIBRARY:BOOL=OFF && make && sudo make install && popd
