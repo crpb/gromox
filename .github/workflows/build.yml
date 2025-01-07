@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        runner: [ ubuntu-22.04, ubuntu-24.04 ]
+        runner: [ ubuntu-22.04 ]
     steps:
     - name: install-deps
       uses: awalsh128/cache-apt-pkgs-action@latest
