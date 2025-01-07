@@ -28,13 +28,18 @@ jobs:
       with:
         repository: jengelh/libHX
         path: libHX
-    - name: buildall
+    - name: cpucores
       run: |
         echo "lspcu-all: $(lscpu -a -p |grep -c -v '^#')"
         echo "lspcu-online: $(lscpu -b -p |grep -c -v '^#')"
         echo "lspcu-offline: $(lscpu -c -p |grep -c -v '^#')"
-        export MAKEFLAGS="-j $(lscpu --online --parse | grep -c -v '^#')"
-        echo -e "lscpu:\t$MAKEFLAGS\nnproc:\t$(nproc)"
+        echo "nproc: $(nproc)"
+        echo "nproc-all: $(nproc --all)"
+        echo "proc-cpuinfo: $(grep -c '^processor' /proc/cpuinfo)"
+    - name: buildall
+      run: |
+        export MAKEFLAGS="-j$(($(nproc)*2))"
+        echo "MAKEFLAGS: $MAKEFLAGS"
         pushd vmime && cmake . -DVMIME_SENDMAIL_PATH:STRING="/usr/sbin/sendmail" -DVMIME_BUILD_SAMPLES:BOOL=OFF -DVMIME_HAVE_TLS_SUPPORT:BOOL=ON -DVMIME_BUILD_STATIC_LIBRARY:BOOL=OFF && make && sudo make install && popd
         pushd libHX && ./qconf && make && sudo make install && popd
         ./qconf
