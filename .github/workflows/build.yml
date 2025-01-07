@@ -48,8 +48,8 @@ jobs:
         #export MAKEFLAGS="-j$(($(nproc)*2))"
         export MAKEFLAGS="-j$(nproc)"
         echo "MAKEFLAGS: $MAKEFLAGS"
-        pushd vmime && cmake . -DVMIME_SENDMAIL_PATH:STRING="/usr/sbin/sendmail" -DVMIME_BUILD_SAMPLES:BOOL=OFF -DVMIME_HAVE_TLS_SUPPORT:BOOL=ON -DVMIME_BUILD_STATIC_LIBRARY:BOOL=OFF && make && make install && popd
-        pushd libHX && ./qconf && make && make install && popd
+        cd vmime && cmake . -DVMIME_SENDMAIL_PATH:STRING="/usr/sbin/sendmail" -DVMIME_BUILD_SAMPLES:BOOL=OFF -DVMIME_HAVE_TLS_SUPPORT:BOOL=ON -DVMIME_BUILD_STATIC_LIBRARY:BOOL=OFF && make && make install && cd -
+        cd libHX && ./qconf && make && make install && cd -
         ./qconf
         LD_LIBRARY_PATH=/usr/local/lib make
         LD_LIBRARY_PATH=/usr/local/lib make install DESTDIR="$PWD/rt" && rm -Rf rt
