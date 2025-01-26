@@ -13,6 +13,7 @@
 #include <gromox/config_file.hpp>
 #include <gromox/contexts_pool.hpp>
 #include <gromox/generic_connection.hpp>
+#include <gromox/mjson.hpp>
 #include <gromox/range_set.hpp>
 #include <gromox/simple_tree.hpp>
 #include <gromox/stream.hpp>
@@ -79,9 +80,6 @@ struct content_array final : public XARRAY {
 
 /**
  * @mid:        midstr
- * @open_mode:  controls unlinking of @file_path upon destruction
- * @file_path:  absolute path in filesystem, built from midstr
- * @message_fd:	feckin descriptor
  * @b_modify:	flag indicating that other clients concurrently modified the mailbox
  * 		(@f_flags, @f_expunged_uids is filled with changes)
  * @contents:	current mapping of seqid -> mid/uid for the currently selected folder
@@ -92,24 +90,23 @@ struct content_array final : public XARRAY {
  */
 struct imap_context final : public schedule_context {
 	imap_context();
-	~imap_context();
 	NOMOVE(imap_context);
 	/* a.k.a. is_login in pop3 */
 	inline bool is_authed() const { return proto_stat >= iproto_stat::auth; }
-	void close_fd();
-	void unlink_file();
-	void close_and_unlink();
 
 	GENERIC_CONNECTION connection;
-	std::string mid, file_path;
-	int message_fd = -1, open_mode = 0;
+	std::string mid, append_folder, append_flags;
+	time_t append_time = 0;
 	iproto_stat proto_stat = iproto_stat::none;
 	isched_stat sched_stat = isched_stat::none;
 	char *write_buff = nullptr;
 	size_t write_length = 0, write_offset = 0;
+	size_t wrdat_offset = 0;
 	time_t selected_time = 0;
 	std::string selected_folder;
 	content_array contents;
+	std::string wrdat_content;
+	bool wrdat_active = false;
 	BOOL b_readonly = false; /* is selected folder read only, this is for the examine command */
 	std::atomic<unsigned int> async_change_mask{0};
 	/*
@@ -127,12 +124,14 @@ struct imap_context final : public schedule_context {
 	char *literal_ptr = nullptr;
 	int literal_len = 0, current_len = 0;
 	STREAM stream; /* stream for writing to imap client */
+	STREAM append_stream;
+	mjson_io io_actor;
 	int auth_times = 0;
 	char username[UADDR_SIZE]{}, maildir[256]{}, defcharset[32]{};
 	bool synchronizing_literal = true;
 };
 
-extern void imap_parser_init(int context_num, int average_num, size_t cache_size, gromox::time_duration timeout, gromox::time_duration autologout_time, int max_auth_times, int block_auth_fail, bool support_tls, bool force_tls, const char *certificate_path, const char *cb_passwd, const char *key_path);
+extern void imap_parser_init(int context_num, int average_num, gromox::time_duration timeout, gromox::time_duration autologout_time, int max_auth_times, int block_auth_fail, bool support_tls, bool force_tls, const char *certificate_path, const char *cb_passwd, const char *key_path);
 extern int imap_parser_run();
 extern tproc_status imap_parser_process(schedule_context *);
 extern void imap_parser_stop();
@@ -150,45 +149,45 @@ extern  void imap_parser_safe_write(imap_context *, const void *pbuff, size_t co
 extern int imap_parser_get_sequence_ID();
 extern void imap_parser_log_info(imap_context *, int level, const char *format, ...) __attribute__((format(printf, 3, 4)));
 
-extern void imap_cmd_parser_clsfld(imap_context *);
-extern int imap_cmd_parser_capability(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_id(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_noop(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_logout(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_starttls(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_authenticate(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_username(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_password(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_login(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_idle(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_select(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_examine(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_create(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_delete(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_rename(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_subscribe(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_unsubscribe(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_list(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_xlist(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_lsub(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_status(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_append(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_append_begin(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_append_end(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_check(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_close(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_expunge(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_unselect(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_search(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_fetch(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_store(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_copy(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_uid_search(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_uid_fetch(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_uid_store(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_uid_copy(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_uid_expunge(int argc, char **argv, imap_context *);
-extern int imap_cmd_parser_dval(int argc, char **argv, imap_context *, unsigned int res);
+extern void icp_clsfld(imap_context &);
+extern int icp_capability(int argc, char **argv, imap_context &);
+extern int icp_id(int argc, char **argv, imap_context &);
+extern int icp_noop(int argc, char **argv, imap_context &);
+extern int icp_logout(int argc, char **argv, imap_context &);
+extern int icp_starttls(int argc, char **argv, imap_context &);
+extern int icp_authenticate(int argc, char **argv, imap_context &);
+extern int icp_username(int argc, char **argv, imap_context &);
+extern int icp_password(int argc, char **argv, imap_context &);
+extern int icp_login(int argc, char **argv, imap_context &);
+extern int icp_idle(int argc, char **argv, imap_context &);
+extern int icp_select(int argc, char **argv, imap_context &);
+extern int icp_examine(int argc, char **argv, imap_context &);
+extern int icp_create(int argc, char **argv, imap_context &);
+extern int icp_delete(int argc, char **argv, imap_context &);
+extern int icp_rename(int argc, char **argv, imap_context &);
+extern int icp_subscribe(int argc, char **argv, imap_context &);
+extern int icp_unsubscribe(int argc, char **argv, imap_context &);
+extern int icp_list(int argc, char **argv, imap_context &);
+extern int icp_xlist(int argc, char **argv, imap_context &);
+extern int icp_lsub(int argc, char **argv, imap_context &);
+extern int icp_status(int argc, char **argv, imap_context &);
+extern int icp_append(int argc, char **argv, imap_context &);
+extern int icp_append_begin(int argc, char **argv, imap_context &);
+extern int icp_append_end(int argc, char **argv, imap_context &);
+extern int icp_check(int argc, char **argv, imap_context &);
+extern int icp_close(int argc, char **argv, imap_context &);
+extern int icp_expunge(int argc, char **argv, imap_context &);
+extern int icp_unselect(int argc, char **argv, imap_context &);
+extern int icp_search(int argc, char **argv, imap_context &);
+extern int icp_fetch(int argc, char **argv, imap_context &);
+extern int icp_store(int argc, char **argv, imap_context &);
+extern int icp_copy(int argc, char **argv, imap_context &);
+extern int icp_uid_search(int argc, char **argv, imap_context &);
+extern int icp_uid_fetch(int argc, char **argv, imap_context &);
+extern int icp_uid_store(int argc, char **argv, imap_context &);
+extern int icp_uid_copy(int argc, char **argv, imap_context &);
+extern int icp_uid_expunge(int argc, char **argv, imap_context &);
+extern int icp_dval(int argc, char **argv, imap_context &, unsigned int res);
 
 extern char *capability_list(char *, size_t, imap_context *);
 

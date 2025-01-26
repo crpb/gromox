@@ -28,9 +28,9 @@
 #include <gromox/threads_pool.hpp>
 #include <gromox/tie.hpp>
 #include <gromox/util.hpp>
-#include "smtp_aux.hpp"
-#include "smtp_cmd_handler.hpp"
-#include "smtp_parser.hpp"
+#include "aux.hpp"
+#include "cmd.hpp"
+#include "parser.hpp"
 #if (defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x2090000fL) || \
     (defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER < 0x1010000fL)
 #	define OLD_SSL 1
@@ -545,41 +545,42 @@ static int smtp_parser_dispatch_cmd2(const char *cmd_line, int line_length,
 	static constexpr struct {
 		char cmd[9];
 		unsigned int len;
-		int (*func)(const char *, int, smtp_context *);
+		int (*func)(std::string_view, smtp_context &);
 	} proc[] = {
-		{"AUTH", 4, smtp_cmd_handler_auth},
-		{"DATA", 4, smtp_cmd_handler_data},
-		{"ETRN", 4, smtp_cmd_handler_etrn},
-		{"HELP", 4, smtp_cmd_handler_help},
-		{"MAIL", 4, smtp_cmd_handler_mail},
-		{"NOOP", 4, smtp_cmd_handler_noop},
-		{"QUIT", 4, smtp_cmd_handler_quit},
-		{"RCPT", 4, smtp_cmd_handler_rcpt},
-		{"RSET", 4, smtp_cmd_handler_rset},
-		{"STARTTLS", 8, smtp_cmd_handler_starttls},
-		{"VRFY", 4, smtp_cmd_handler_vrfy},
+		{"AUTH", 4, cmdh_auth},
+		{"DATA", 4, cmdh_data},
+		{"ETRN", 4, cmdh_etrn},
+		{"HELP", 4, cmdh_help},
+		{"MAIL", 4, cmdh_mail},
+		{"NOOP", 4, cmdh_noop},
+		{"QUIT", 4, cmdh_quit},
+		{"RCPT", 4, cmdh_rcpt},
+		{"RSET", 4, cmdh_rset},
+		{"STARTTLS", 8, cmdh_starttls},
+		{"VRFY", 4, cmdh_vrfy},
 	};
 	/* check the line length */
 	if (line_length > 1000) {
 		/* 500 syntax error - line too long */
 		return 502;
 	}
+	std::string_view cmdz(cmd_line, line_length);
 	if (g_param.cmd_prot & HT_LMTP) {
 		if (strncasecmp(cmd_line, "LHLO", 4) == 0)
-			return smtp_cmd_handler_lhlo(cmd_line, line_length, pcontext);
+			return cmdh_lhlo(cmdz, *pcontext);
 	}
 	if (g_param.cmd_prot & HT_SMTP) {
 		if (strncasecmp(cmd_line, "HELO", 4) == 0)
-			return smtp_cmd_handler_helo(cmd_line, line_length, pcontext);
+			return cmdh_helo(cmdz, *pcontext);
 		if (strncasecmp(cmd_line, "EHLO", 4) == 0)
-			return smtp_cmd_handler_ehlo(cmd_line, line_length, pcontext);
+			return cmdh_ehlo(cmdz, *pcontext);
 	}
 	auto scmp = [](decltype(*proc) &p, const char *line) { return strncasecmp(p.cmd, line, p.len) < 0; };
 	auto it = std::lower_bound(std::begin(proc), std::end(proc), cmd_line, scmp);
 	if (it != std::end(proc) && strncasecmp(cmd_line, it->cmd, it->len) == 0 &&
 	    (cmd_line[it->len] == '\0' || HX_isspace(cmd_line[it->len])))
-		return it->func(cmd_line, line_length, pcontext);
-	return smtp_cmd_handler_else(cmd_line, line_length, pcontext);
+		return it->func(cmdz, *pcontext);
+	return cmdh_else(cmdz, *pcontext);
 }
 
 static int smtp_parser_dispatch_cmd(const char *cmd, int len, SMTP_CONTEXT *ctx)

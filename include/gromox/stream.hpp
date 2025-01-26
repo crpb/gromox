@@ -40,6 +40,10 @@ struct stream_block {
 
 struct GX_EXPORT STREAM {
 	STREAM();
+	STREAM(const STREAM &) = default;
+	STREAM(STREAM &&) = delete;
+	STREAM &operator=(const STREAM &) = default;
+	STREAM &operator=(STREAM &&);
 
 	int has_newline() const { return line_result; }
 	unsigned int readline(char **);
@@ -58,7 +62,6 @@ struct GX_EXPORT STREAM {
 	size_t get_total_length() const { return wr_total_pos; }
 	scopy_result copyline(char *buf, unsigned int *size);
 	unsigned int peek_buffer(char *, unsigned int) const;
-	int dump(int fd);
 	int write(const void *buf, size_t);
 
 	std::list<stream_block>::iterator pnode_rd{}, pnode_wr{};

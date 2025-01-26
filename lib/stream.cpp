@@ -37,6 +37,24 @@ STREAM::STREAM() : list(std::make_shared<std::list<stream_block>>())
 	pstream->pnode_rd = pstream->pnode_wr;
 }
 
+STREAM &STREAM::operator=(STREAM &&o)
+{
+	clear();
+	std::swap(pnode_rd, o.pnode_rd);
+	std::swap(pnode_wr, o.pnode_wr);
+	std::swap(line_result, o.line_result);
+	std::swap(eom_result, o.eom_result);
+	std::swap(rd_block_pos, o.rd_block_pos);
+	std::swap(wr_block_pos, o.wr_block_pos);
+	std::swap(rd_total_pos, o.rd_total_pos);
+	std::swap(wr_total_pos, o.wr_total_pos);
+	std::swap(last_eom_parse, o.last_eom_parse);
+	std::swap(block_line_parse, o.block_line_parse);
+	std::swap(block_line_pos, o.block_line_pos);
+	std::swap(list, o.list);
+	return *this;
+}
+
 /*
  *	  retrieve pointer of the line following the read pointer
  *	  @param
@@ -679,31 +697,6 @@ unsigned int STREAM::peek_buffer(char *pbuff, unsigned int size) const
 	memcpy(&pbuff[tmp_size], pnode->cdata, pstream->wr_block_pos);
 	return actual_size;
 }
-
-/*
- *	dump content in stream into file
- *	@param
- *		pstream [in]			stream object
- *		fd						file descriptor
- *	@return
- *		STREAM_DUMP_FAIL		fail
- *		STREAM_DUMP_OK			OK
- */
-int STREAM::dump(int fd)
-{
-	void *pbuff;
-	unsigned int size = STREAM_BLOCK_SIZE;
-
-	reset_reading();
-	while ((pbuff = get_read_buf(&size)) != nullptr) {
-		auto wr_result = ::write(fd, pbuff, size);
-		if (wr_result < 0 || static_cast<size_t>(wr_result) != size)
-			return STREAM_DUMP_FAIL;
-		size = STREAM_BLOCK_SIZE;
-	}
-	return STREAM_DUMP_OK;
-}
-
 
 /*
  *	  forward the reading pointer.

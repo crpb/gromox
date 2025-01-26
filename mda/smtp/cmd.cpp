@@ -14,18 +14,18 @@
 #include <gromox/mail_func.hpp>
 #include <gromox/mysql_adaptor.hpp>
 #include <gromox/util.hpp>
-#include "smtp_aux.hpp"
-#include "smtp_cmd_handler.hpp"
-#include "smtp_parser.hpp"
+#include "aux.hpp"
+#include "cmd.hpp"
+#include "parser.hpp"
 
 using namespace gromox;
 
-static BOOL smtp_cmd_handler_check_onlycmd(const char *cmd_line,
-    int line_length, SMTP_CONTEXT *pcontext);
+static BOOL cmdh_check_onlycmd(std::string_view cmd_line, smtp_context &);
 
-int smtp_cmd_handler_helo(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_helo(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
+	int line_length = cmd_line.size();
 	pcontext->command_protocol = HT_SMTP;
 	if (line_length >= 5 && line_length <= UDOM_SIZE - 1 + 5) {
         /* command error, cannot be recognized by system */
@@ -33,7 +33,7 @@ int smtp_cmd_handler_helo(const char* cmd_line, int line_length,
 			/* 502 Command not implemented */
 			return 506;
 		/* copy parameter to hello_domain */
-		strncpy(pcontext->menv.hello_domain, cmd_line + 5, line_length - 5);
+		strncpy(pcontext->menv.hello_domain, &cmd_line[5], line_length - 5);
 		pcontext->menv.hello_domain[line_length-5] = '\0';
     } else if(line_length > 255 + 1 + 4) {
         /* domain name too long */
@@ -45,9 +45,10 @@ int smtp_cmd_handler_helo(const char* cmd_line, int line_length,
 	return 205;
 }    
 
-static int smtp_cmd_handler_xhlo(const char *cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+static int cmdh_xhlo(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
+	int line_length = cmd_line.size();
 	size_t string_length = 0;
     char buff[1024];
             
@@ -57,7 +58,7 @@ static int smtp_cmd_handler_xhlo(const char *cmd_line, int line_length,
 		if (cmd_line[4] != ' ')
 			return 506;
 		/* copy parameter to hello_domain */
-		strncpy(pcontext->menv.hello_domain, cmd_line + 5, line_length - 5);
+		strncpy(pcontext->menv.hello_domain, &cmd_line[5], line_length - 5);
 		pcontext->menv.hello_domain[line_length-5] = '\0';
     } else if(line_length > 255 + 1 + 4) {
         /* domain name too long */
@@ -87,23 +88,21 @@ static int smtp_cmd_handler_xhlo(const char *cmd_line, int line_length,
     return DISPATCH_CONTINUE;
 }
 
-int smtp_cmd_handler_lhlo(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_lhlo(std::string_view cmd_line, smtp_context &ctx)
 {
-	pcontext->command_protocol = HT_LMTP;
-	return smtp_cmd_handler_xhlo(cmd_line, line_length, pcontext);
+	ctx.command_protocol = HT_LMTP;
+	return cmdh_xhlo(cmd_line, ctx);
 }
 
-int smtp_cmd_handler_ehlo(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_ehlo(std::string_view cmd_line, smtp_context &ctx)
 {
-	pcontext->command_protocol = HT_SMTP;
-	return smtp_cmd_handler_xhlo(cmd_line, line_length, pcontext);
+	ctx.command_protocol = HT_SMTP;
+	return cmdh_xhlo(cmd_line, ctx);
 }
 
-int smtp_cmd_handler_starttls(const char *cmd_line, int line_length,
-	SMTP_CONTEXT *pcontext)
+int cmdh_starttls(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
 	if (pcontext->connection.ssl != nullptr)
 		return 506;
 	if (!g_param.support_starttls)
@@ -114,9 +113,9 @@ int smtp_cmd_handler_starttls(const char *cmd_line, int line_length,
 	return 210;
 }
 
-int smtp_cmd_handler_auth(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_auth(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
 	if (g_param.support_starttls && g_param.force_starttls &&
 	    pcontext->connection.ssl == nullptr)
 		return 520;
@@ -124,17 +123,18 @@ int smtp_cmd_handler_auth(const char* cmd_line, int line_length,
 	return 506;
 }
 
-int smtp_cmd_handler_mail(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_mail(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
+	int line_length = cmd_line.size();
 	size_t string_length = 0;
     const char *smtp_reply_str, *smtp_reply_str2;
     char buff[1024], buff2[1024];
     
-	if (line_length <= 10 || 0 != strncasecmp(cmd_line + 4, " FROM:", 6))
+	if (line_length <= 10 || strncasecmp(&cmd_line[4], " FROM:", 6) != 0)
 		/* syntax error or arguments error*/
 		return 505;
-    memcpy(buff, cmd_line + 10    , line_length - 10);
+	memcpy(buff, &cmd_line[10], line_length - 10);
     buff[line_length - 10] = '\0';
 	HX_strltrim(buff);
 	/* rfc require MTA support empty from address */
@@ -162,8 +162,7 @@ int smtp_cmd_handler_mail(const char* cmd_line, int line_length,
             T_MAIL_CMD == pcontext->last_cmd ||
             T_END_MAIL == pcontext->last_cmd) {
             pcontext->last_cmd = T_MAIL_CMD;
-			snprintf(pcontext->menv.from, std::size(pcontext->menv.from), "%s@%s",
-                email_addr.local_part, email_addr.domain);
+			gx_strlcpy(ctx.menv.from, email_addr.addr, std::size(ctx.menv.from));
             /* 250 OK */
 			return 205;
 	}
@@ -171,20 +170,21 @@ int smtp_cmd_handler_mail(const char* cmd_line, int line_length,
 	return 507;
 }
 
-int smtp_cmd_handler_rcpt(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext) try
+int cmdh_rcpt(std::string_view cmd_line, smtp_context &ctx) try
 {
+	auto pcontext = &ctx;
+	int line_length = cmd_line.size();
 	size_t string_length = 0;
     const char*smtp_reply_str, *smtp_reply_str2;
 	char buff[1024], reason[1024];
     
-	if (line_length <= 8 || 0 != strncasecmp(cmd_line + 4, " TO:", 4))
+	if (line_length <= 8 || strncasecmp(&cmd_line[4], " TO:", 4) != 0)
         /* syntax error or arguments error*/
 		return 505;
 	if (g_param.support_starttls && g_param.force_starttls &&
 	    pcontext->connection.ssl == nullptr)
 		return 520;
-    memcpy(buff, cmd_line + 8, line_length - 8);
+	memcpy(buff, &cmd_line[8], line_length - 8);
     buff[line_length - 8] = '\0';
 	EMAIL_ADDR email_addr(buff);
 	if (!email_addr.has_addr()) {
@@ -236,9 +236,9 @@ int smtp_cmd_handler_rcpt(const char* cmd_line, int line_length,
 	return 416; /* ENOMEM */
 }
 
-int smtp_cmd_handler_data(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_data(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
 	size_t string_length = 0;
     const char* smtp_reply_str;
 
@@ -250,7 +250,7 @@ int smtp_cmd_handler_data(const char* cmd_line, int line_length,
 		 * we happen to fulfill RFC 2033 §4.2 requirements here.
 		 */
 		return 509;
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line,line_length,pcontext))
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
 	if (g_param.support_starttls && g_param.force_starttls &&
 	    pcontext->connection.ssl == nullptr)
@@ -301,13 +301,13 @@ int smtp_cmd_handler_data(const char* cmd_line, int line_length,
 	return DISPATCH_BREAK;
 }    
 
-int smtp_cmd_handler_quit(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_quit(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
 	size_t string_length = 0;
     char buff[1024];
     
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line, line_length, pcontext))
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
     /* 221 <domain> Good-bye */
 	sprintf(buff, "%s%s%s",
@@ -318,10 +318,10 @@ int smtp_cmd_handler_quit(const char* cmd_line, int line_length,
     return DISPATCH_SHOULD_CLOSE;
 }
 
-int smtp_cmd_handler_rset(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_rset(std::string_view cmd_line, smtp_context &ctx)
 {
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line, line_length, pcontext))
+	auto pcontext = &ctx;
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
     pcontext->last_cmd = T_RSET_CMD;
 	pcontext->menv.clear();
@@ -329,20 +329,19 @@ int smtp_cmd_handler_rset(const char* cmd_line, int line_length,
 	return 205;
 }    
 
-int smtp_cmd_handler_noop(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_noop(std::string_view cmd_line, smtp_context &ctx)
 {
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line, line_length, pcontext))
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
 	/* Caution: no need to mark the last_cmd */
     /* 250 OK */
 	return 205;
 }
 
-int smtp_cmd_handler_help(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_help(std::string_view cmd_line, smtp_context &ctx)
 {
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line, line_length, pcontext))
+	auto pcontext = &ctx;
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
 	if (g_param.support_starttls && g_param.force_starttls &&
 	    pcontext->connection.ssl == nullptr)
@@ -351,10 +350,10 @@ int smtp_cmd_handler_help(const char* cmd_line, int line_length,
 	return 201;
 }        
 
-int smtp_cmd_handler_vrfy(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_vrfy(std::string_view cmd_line, smtp_context &ctx)
 {
-	if (!smtp_cmd_handler_check_onlycmd(cmd_line, line_length, pcontext))
+	auto pcontext = &ctx;
+	if (!cmdh_check_onlycmd(cmd_line, ctx))
 		return DISPATCH_CONTINUE;
 	if (g_param.support_starttls && g_param.force_starttls &&
 	    pcontext->connection.ssl == nullptr)
@@ -363,23 +362,22 @@ int smtp_cmd_handler_vrfy(const char* cmd_line, int line_length,
 	return 209;
 }    
 
-int smtp_cmd_handler_etrn(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_etrn(std::string_view cmd_line, smtp_context &ctx)
 {
 	/* command not implement*/
 	return 506;
 }
 
-int smtp_cmd_handler_else(const char* cmd_line, int line_length,
-    SMTP_CONTEXT *pcontext)
+int cmdh_else(std::string_view cmd_line, smtp_context &ctx)
 {
     /* command not implement*/
 	return 506;
 }
 
-static BOOL smtp_cmd_handler_check_onlycmd(const char *cmd_line,
-    int line_length, SMTP_CONTEXT *pcontext)
+static BOOL cmdh_check_onlycmd(std::string_view cmd_line, smtp_context &ctx)
 {
+	auto pcontext = &ctx;
+	int line_length = cmd_line.size();
 	for (ssize_t i = 4; i < line_length; ++i) {
 		if (cmd_line[i] == ' ')
 			continue;
