@@ -1194,6 +1194,24 @@ sTimePoint::sTimePoint(time_point tp, const tSerializableTimeZone& tz) :
 /**
  * @brief     Create time point from date-time string
  *
+ * As of 2025-01-27 we have identified 3 different datetime formats sent by
+ * the clients.
+ * Zulu time (UTC), no DST, no offset:
+ * `<t:Start>2024-04-29T19:30:00Z</t:Start>`
+ * With the offset information in datetime, additionally a timezone tag:
+ * `<t:Start>2024-11-27T13:00:00+01:00</t:Start>`
+ * `<t:StartTimeZone Id="W. Europe Standard Time"/>`
+ * `<t:EndTimeZone Id="W. Europe Standard Time"/>`
+ * Local time with a timezone tag, it's necessary to calculate the offset:
+ * `<t:Start>2024-09-25T09:00:00</t:Start>`
+ * ```
+ * <t:ExtendedProperty>
+ *   <t:ExtendedFieldURI PropertyName="CalendarTimeZone" PropertySetId="A7B529B5-4B75-47A7-A24F-20743D6C55CD" PropertyType="String"/>
+ *   <t:Value>Europe/Vienna</t:Value>
+ * </t:ExtendedProperty>
+ * ```
+ * `<t:MeetingTimeZone TimeZoneName="W. Europe Standard Time"/>`
+ *
  * @throw     DeserializationError   Conversion failed
  *
  * @param     Date-time string
@@ -1217,7 +1235,9 @@ sTimePoint::sTimePoint(const char* dtstr)
 		throw EWSError::ValueOutOfRange(E3152);
 	time = clock::from_time_t(timestamp);
 	time += std::chrono::duration_cast<time_point::duration>(std::chrono::duration<double>(seconds));
-	offset = std::chrono::minutes(60*tz_hour+(tz_hour < 0? -tz_min : tz_min));
+	offset = std::chrono::minutes(60 * (-tz_hour) + (tz_hour > 0 ? -tz_min : tz_min));
+	if(strlen(dtstr) == 19)
+		calcOffset = true;
 }
 
 /**
@@ -1231,6 +1251,12 @@ sTimePoint sTimePoint::fromNT(uint64_t timestamp)
  */
 uint64_t sTimePoint::toNT() const
 {return rop_util_unix_to_nttime(time-offset);}
+
+/**
+ * @brief     Whether it's necessary to calculate the offset from timezone
+ */
+bool sTimePoint::needCalcOffset() const
+{return calcOffset;}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Types implementation
@@ -2999,6 +3025,7 @@ decltype(tFieldURI::tagMap) tFieldURI::tagMap = {
 	{"item:DateTimeReceived", PR_MESSAGE_DELIVERY_TIME},
 	{"item:DateTimeSent", PR_CLIENT_SUBMIT_TIME},
 	{"item:DisplayTo", PR_DISPLAY_TO},
+	{"item:Flag", PR_FLAG_STATUS},
 	{"item:HasAttachments", PR_HASATTACH},
 	{"item:Importance", PR_IMPORTANCE},
 	{"item:InReplyTo", PR_IN_REPLY_TO_ID},
@@ -3055,6 +3082,9 @@ decltype(tFieldURI::nameMap) tFieldURI::nameMap = {
 	{"contacts:FileAs", {NtFileAs, PT_UNICODE}},
 	{"contacts:PostalAddressIndex", {NtPostalAddressIndex, PT_LONG}},
 	{"item:Categories", {NtCategories, PT_MV_UNICODE}},
+	{"item:Flag", {NtTaskDateCompleted, PT_SYSTIME}},
+	{"item:Flag", {NtTaskDueDate, PT_SYSTIME}},
+	{"item:Flag", {NtTaskStartDate, PT_SYSTIME}},
 	{"item:ReminderDueBy", {NtReminderTime, PT_SYSTIME}},
 	{"item:ReminderIsSet", {NtReminderSet, PT_BOOLEAN}},
 	{"item:ReminderMinutesBeforeStart", {NtReminderDelta, PT_LONG}},
@@ -3443,6 +3473,17 @@ void tItem::update(const sShape& shape)
 		ReminderDueBy.emplace(rop_util_nttime_to_unix2(*static_cast<const uint64_t*>(prop->pvalue)));
 	fromProp(shape.get(NtReminderSet), ReminderIsSet);
 	fromProp(shape.get(NtReminderDelta), ReminderMinutesBeforeStart);
+	if((v32 = shape.get<uint32_t>(PR_FLAG_STATUS))) {
+		defaulted(Flag).FlagStatus = *v32 == followupComplete ? Enum::Complete : Enum::Flagged;
+		if((prop = shape.get(NtTaskDateCompleted)))
+			defaulted(Flag).CompleteDate.emplace(rop_util_nttime_to_unix2(*static_cast<const uint64_t*>(prop->pvalue)));
+		if((prop = shape.get(NtTaskDueDate)))
+			defaulted(Flag).DueDate.emplace(rop_util_nttime_to_unix2(*static_cast<const uint64_t*>(prop->pvalue)));
+		if((prop = shape.get(NtTaskStartDate)))
+			defaulted(Flag).StartDate.emplace(rop_util_nttime_to_unix2(*static_cast<const uint64_t*>(prop->pvalue)));
+	}
+	else
+		defaulted(Flag).FlagStatus = Enum::NotFlagged;
 
 	shape.putExtended(ExtendedProperty);
 };
